@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>توقع الجولة القادمة</title>
+  <style>
+    body {
+      background: linear-gradient(to bottom, #0f2027, #203a43, #2c5364);
+      color: white;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      height: 100vh;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      direction: rtl;
+    }
+    
+    .container {
+      background-color: rgba(0, 0, 0, 0.7);
+      border-radius: 15px;
+      padding: 40px;
+      width: 80%;
+      max-width: 500px;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+    }
+    
+    h1 {
+      color: #FFD700;
+      font-size: 28px;
+      margin-bottom: 30px;
+      text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+    }
+    
+    .prediction-value {
+      font-size: 80px;
+      font-weight: bold;
+      color: #FFD700;
+      margin: 30px 0;
+      text-shadow: 0 0 15px rgba(255, 215, 0, 0.7);
+    }
+    
+    .status {
+      font-size: 18px;
+      color: #8be9fd;
+      margin: 20px 0;
+    }
+
+    @keyframes flash {
+      0% { color: white; text-shadow: 0 0 20px white; }
+      100% { color: #FFD700; text-shadow: 0 0 15px rgba(255, 215, 0, 0.7); }
+    }
+    
+    .flash {
+      animation: flash 0.8s ease;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>توقع نقطة الانفجار للجولة القادمة</h1>
+    
+    <div class="prediction-value" id="predictionValue">---</div>
+    
+    <div class="status" id="status">جاري الاتصال بالخادم...</div>
+  </div>
+
+  <script>
+    const predictionValue = document.getElementById('predictionValue');
+    const status = document.getElementById('status');
+    let previousPrediction = null;
+    
+    // إنشاء اتصال WebSocket
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    const socket = new WebSocket(wsUrl);
+    
+    // عند فتح الاتصال
+    socket.onopen = () => {
+      status.textContent = 'متصل بالخادم';
+    };
+    
+    // عند استلام رسالة
+    socket.onmessage = (event) => {
+      try {
+        const gameState = JSON.parse(event.data);
+        
+        // تحديث التوقع للجولة القادمة
+        if (gameState.nextCrashPoint) {
+          // إذا تغير التوقع، أضف تأثير الوميض
+          if (previousPrediction !== null && previousPrediction !== gameState.nextCrashPoint) {
+            predictionValue.classList.remove('flash');
+            void predictionValue.offsetWidth; // Trigger reflow
+            predictionValue.classList.add('flash');
+          }
+          
+          previousPrediction = gameState.nextCrashPoint;
+          predictionValue.textContent = `${gameState.nextCrashPoint}x`;
+        }
+        
+        // تحديث حالة الجولة
+        switch (gameState.status) {
+          case 'waiting':
+            status.textContent = `الجولة القادمة تبدأ في ${gameState.countdown} ثوانٍ`;
+            break;
+          case 'active':
+            status.textContent = `الجولة الحالية نشطة - المضاعف الحالي: ${gameState.multiplier}x`;
+            break;
+          case 'crashed':
+            status.textContent = `انتهت الجولة - انفجار عند ${gameState.lastCrashPoint}x`;
+            break;
+        }
+      } catch (error) {
+        console.error('خطأ في تحليل بيانات اللعبة:', error);
+      }
+    };
+    
+    // عند حدوث خطأ
+    socket.onerror = (error) => {
+      status.textContent = 'حدث خطأ في الاتصال';
+      console.error('خطأ في اتصال WebSocket:', error);
+    };
+    
+    // عند إغلاق الاتصال
+    socket.onclose = () => {
+      status.textContent = 'انقطع الاتصال بالخادم. جاري إعادة الاتصال...';
+      
+      // إعادة الاتصال بعد 3 ثوانٍ
+      setTimeout(() => {
+        window.location.reload();
+      }, 3000);
+    };
+  </script>
+</body>
+</html>

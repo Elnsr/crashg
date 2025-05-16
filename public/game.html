@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Crash Game</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: linear-gradient(to top, #0f2027, #203a43, #2c5364);
+    }
+
+    canvas {
+      display: block;
+    }
+
+    #odds {
+      position: fixed;
+      bottom: 0px;
+      right: 10px;
+      font-size: 38px;
+      font-family: Arial, sans-serif;
+      color: white;
+      background-color: rgba(0,0,0,0.0);
+      padding: 10px 20px;
+      border-radius: 10px;
+      z-index: 10;
+      display: block;
+    }
+
+    /* مؤقت زاوية */
+    .corner-container {
+      position: fixed;
+      bottom: -20px;
+      right: -15px;
+      width: 200px;
+      height: 200px;
+      z-index: 10;
+    }
+    .bar {
+      position: absolute;
+      width: 6px;
+      height: 15px;
+      background-color: white;
+      border-radius: 10px;
+      transform-origin: bottom center;
+      transition: transform 0.3s ease;
+    }
+    .bar.orange {
+      background-color: orange;
+    }
+    .circle {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      background-color: white;
+      border-radius: 50%;
+      z-index: 2;
+      bottom: 30px;
+      right: 95px;
+    }
+    .number {
+      position: absolute;
+      bottom: 22px;
+      right: 35px;
+      color: white;
+      font-size: 38px;
+      font-family: Arial, sans-serif;
+      z-index: 2;
+    }
+    .bars-wrapper {
+      position: absolute;
+      bottom: 30px;
+      right: 35px;
+      z-index: 1;
+    }
+    @keyframes bounce {
+      0%   { bottom: 36px; }
+      0%  { bottom: 30px; }
+      2%  { bottom: 32px; }
+      75%  { bottom: 30px; }
+      85%  { bottom: 31px; }
+      20% { bottom: 30px; }
+    }
+    .bounce {
+      animation: bounce 1.0s ease;
+    }
+  </style>
+</head>
+<body>
+<canvas id="crashCanvas"></canvas>
+
+<div id="odds">1.00x</div>
+
+<!-- مؤقت دائري -->
+<div class="corner-container" id="counterContainer">
+  <div class="bars-wrapper" id="barsWrapper"></div>
+  <div class="circle" id="circleDot"></div>
+  <div class="number" id="count">7</div>
+</div>
+
+<script>
+// ثوابت ومتغيرات العرض
+const initialPlaneOffset = 13;
+const finalPlaneOffset = -5;
+const maxFlightTime = 9;
+const canvas = document.getElementById('crashCanvas');
+const ctx = canvas.getContext('2d');
+let width = canvas.width = window.innerWidth;
+let height = canvas.height = window.innerHeight;
+
+const planeImg = new Image();
+planeImg.src = "https://i.postimg.cc/DwMdqhHQ/1000241814-removebg-preview.png";
+
+const smokeImg = new Image();
+smokeImg.src = "https://i.postimg.cc/d0GbRMKX/explosion-smoke.png";
+
+const oddsDiv = document.getElementById('odds');
+const counterContainer = document.getElementById("counterContainer");
+const barsWrapper = document.getElementById("barsWrapper");
+const circleDot = document.getElementById("circleDot");
+const countElem = document.getElementById("count");
+
+// متغيرات اللعبة
+let gameState = {
+  status: 'waiting',
+  multiplier: 1.0,
+  countdown: 7,
+  crashPoint: 0
+};
+let time = 0;
+let scale = 150;
+let speed = 0.015;
+let isStopped = false;
+let showSmoke = false;
+let pointsForAngle = [];
+let animationRef = null;
+let lastMultiplier = 1.0;
+
+// توليد الشرائط للعداد
+const angles = [-78, -55, -30, -5, 17, 40, 63];
+const bars = [];
+const lift = -90;
+
+angles.forEach((angle, index) => {
+  const bar = document.createElement("div");
+  bar.classList.add("bar");
+  if (index === 6) bar.classList.add("orange");
+
+  bar.dataset.angle = angle;
+  bar.dataset.offset = lift;
+
+  bar.style.transform = `rotate(${angle}deg) translateY(${lift}px)`;
+  barsWrapper.appendChild(bar);
+  bars.push(bar);
+});
+
+// وظيفة حساب زاوية الطائرة
+function calculateAngle(x1, y1, x2, y2) {
+  return Math.atan2(y2 - y1, x2 - x1);
+}
+
+// تهيئة متغيرات اللعبة بناءً على الحالة الحالية
+function setupGameState() {
+  if (gameState.status === 'waiting') {
+    // إظهار العداد
+    counterContainer.style.display = 'block';
+    oddsDiv.style.display = 'none';
+    
+    // تحديث العد التنازلي
+    countElem.textContent = gameState.countdown;
+    
+    // إذا كان animationRef نشطًا، قم بإلغائه
+    if (animationRef) {
+      cancelAnimationFrame(animationRef);
+      animationRef = null;
+    }
+    
+    // إعادة تعيين متغيرات الرسم
+    time = 0;
+    isStopped = false;
+    showSmoke = false;
+    ctx.clearRect(0, 0, width, height);
+    
+    // تهيئة أشرطة العداد
+    bars.forEach((bar, index) => {
+      const angle = angles[index] - (7 - gameState.countdown) * 23;
+      bar.dataset.angle = angle;
+      bar.style.transform = `rotate(${angle}deg) translateY(${lift}px)`;
+    });
+  } else if (gameState.status === 'active') {
+    // إخفاء العداد وإظهار المضاعف
+    counterContainer.style.display = 'none';
+    oddsDiv.style.display = 'block';
+    
+    // تحديث المضاعف
+    oddsDiv.textContent = `${gameState.multiplier.toFixed(2)}x`;
+    
+    // تعديل متغيرات الرسم لتتناسب مع المضاعف الحالي
+    if (gameState.multiplier > 1) {
+      const estimatedTime = (gameState.multiplier - 1) / 0.05;
+      time = estimatedTime * speed * 10;
+    }
+    
+    // إذا لم يكن هناك رسم نشط، ابدأ الرسم
+    if (!animationRef) {
+      draw();
+    }
+  } else if (gameState.status === 'crashed') {
+    // تحديث المضاعف النهائي
+    oddsDiv.textContent = `${gameState.multiplier.toFixed(2)}x`;
+    
+    // إظهار الانفجار
+    showSmoke = true;
+    isStopped = true;
+    
+    // إلغاء الرسم النشط إذا كان موجودًا
+    if (animationRef) {
+      cancelAnimationFrame(animationRef);
+      animationRef = null;
+    }
+    
+    // إذا كان هناك وقت، قم برسم الانفجار مرة واحدة
+    draw(true);
+  }
+}
+
+// دالة الرسم الرئيسية
+function draw(finalFrame = false) {
+  ctx.clearRect(0, 0, width, height);
+  ctx.beginPath();
+  ctx.moveTo(0, height);
+
+  let lastX = 0, lastY = height;
+  pointsForAngle = [];
+
+  for (let t = 0; t <= time; t += 0.01) {
+    let x = t * scale;
+    let y = height - ((t + 0.3) * 50 + Math.pow(t, 2) * 10);
+    if (x > width * 0.7) break;
+
+    ctx.lineTo(x, y);
+    pointsForAngle.push({ x, y });
+    lastX = x;
+    lastY = y;
+  }
+
+  ctx.lineWidth = 3;
+  const gradient = ctx.createLinearGradient(0, 0, lastX, 0);
+  gradient.addColorStop(0, "#FFD700");        // ذهبي
+  gradient.addColorStop(1, "#FF8C00");        // برتقالي غامق
+
+  ctx.strokeStyle = gradient;
+  ctx.stroke();
+
+  if (!showSmoke && planeImg.complete && pointsForAngle.length > 5) {
+    const prev = pointsForAngle[pointsForAngle.length - 5];
+    const curr = pointsForAngle[pointsForAngle.length - 1];
+    const angle = calculateAngle(prev.x, prev.y, curr.x, curr.y);
+
+    const progress = Math.min(time / maxFlightTime, 1);
+    const currentOffset = initialPlaneOffset + (finalPlaneOffset - initialPlaneOffset) * progress;
+
+    ctx.save();
+    ctx.translate(curr.x, curr.y + currentOffset);
+    ctx.rotate(angle);
+    ctx.drawImage(planeImg, -40, -30, 50, 35);
+    ctx.restore();
+  } else if (showSmoke && smokeImg.complete) {
+    ctx.drawImage(smokeImg, lastX - 40, lastY - 40, 60, 60);
+  }
+
+  // إذا كانت اللعبة نشطة، استمر في الرسم
+  if (!finalFrame && !isStopped && gameState.status === 'active') {
+    // تحديث المضاعف من gameState
+    oddsDiv.textContent = `${gameState.multiplier.toFixed(2)}x`;
+    
+    // تحديث الوقت بناءً على الفرق في المضاعف منذ آخر إطار
+    if (gameState.multiplier > lastMultiplier) {
+      const multiplierDiff = gameState.multiplier - lastMultiplier;
+      time += multiplierDiff / 0.05 * speed;
+      lastMultiplier = gameState.multiplier;
+    }
+    
+    animationRef = requestAnimationFrame(draw);
+  }
+}
+
+// إنشاء اتصال WebSocket
+const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+const wsUrl = `${protocol}//${window.location.host}`;
+const socket = new WebSocket(wsUrl);
+
+// عند فتح الاتصال
+socket.onopen = () => {
+  console.log('متصل بالخادم');
+};
+
+// عند استلام رسالة
+socket.onmessage = (event) => {
+  try {
+    const newState = JSON.parse(event.data);
+    
+    // التحقق مما إذا كان هناك تغيير في الحالة
+    const statusChanged = newState.status !== gameState.status;
+    
+    // تحديث حالة اللعبة
+    gameState = newState;
+    
+    // إذا تغيرت الحالة، قم بإعداد اللعبة من جديد
+    if (statusChanged) {
+      setupGameState();
+    } else {
+      // تحديث عناصر محددة بناءً على الحالة
+      if (gameState.status === 'waiting') {
+        countElem.textContent = gameState.countdown;
+      } else if (gameState.status === 'active') {
+        // تحديث المضاعف سيحدث في دالة draw
+      }
+    }
+  } catch (error) {
+    console.error('خطأ في تحليل بيانات اللعبة:', error);
+  }
+};
+
+// عند حدوث خطأ
+socket.onerror = (error) => {
+  console.error('خطأ في اتصال WebSocket:', error);
+};
+
+// عند إغلاق الاتصال
+socket.onclose = () => {
+  console.log('انقطع الاتصال بالخادم. جاري إعادة الاتصال...');
+  
+  // إعادة الاتصال بعد 3 ثوانٍ
+  setTimeout(() => {
+    window.location.reload();
+  }, 3000);
+};
+
+// ضبط حجم الكانفاس عند تغيير حجم النافذة
+window.addEventListener('resize', () => {
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+  
+  // إعادة رسم اللعبة
+  if (!animationRef && gameState.status !== 'waiting') {
+    draw(true);
+  }
+});
+
+// تهيئة اللعبة عند التحميل
+setupGameState();
+</script>
+</body>
+</html>
